@@ -149,12 +149,14 @@ class RankingTask(base_task.Task):
       A Ranking model instance.
     """
     lr_config = self.optimizer_config.lr_config
+    assert self.optimizer_config.embedding_optimizer == "Adagrad"
     embedding_optimizer = tf.keras.optimizers.legacy.Adagrad(
         learning_rate=lr_config.learning_rate,
         initial_accumulator_value=self.optimizer_config.initial_accumulator_value,
         epsilon=self.optimizer_config.epsilon,
     )
 
+    assert self.optimizer_config.dense_optimizer == "Adagrad"
     dense_optimizer = tf.keras.optimizers.legacy.Adagrad(
         learning_rate=lr_config.learning_rate,
         initial_accumulator_value=self.optimizer_config.initial_accumulator_value,
