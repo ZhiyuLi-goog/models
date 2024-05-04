@@ -20,7 +20,7 @@ def init_print(params, seed):
 
   mllogger.event(mllog_constants.TRAIN_SAMPLES, _NUM_TRAIN_EXAMPLES)
   mllogger.event(mllog_constants.EVAL_SAMPLES, _NUM_EVAL_EXAMPLES)
-  
+
   assert params.trainer.optimizer_config.embedding_optimizer == params.trainer.optimizer_config.dense_optimizer, "optimizer mismatch"
   assert params.trainer.optimizer_config.embedding_optimizer == "Adagrad", "optimizer type error"
   mllogger.event(mllog_constants.OPT_NAME, mllog_constants.ADAGRAD)
