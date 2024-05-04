@@ -98,7 +98,7 @@ class CriteoTFRecordReader(object):
     self._num_files = len(dataset)
     self._num_input_pipelines = ctx.num_input_pipelines
     self._input_pipeline_id = ctx.input_pipeline_id
-    self._parallelism = min(self._num_files/self._num_input_pipelines, 8)
+    self._parallelism = int(min(self._num_files/self._num_input_pipelines, 8))
     
     dataset = dataset.shard(self._num_input_pipelines,
                               self._input_pipeline_id)
