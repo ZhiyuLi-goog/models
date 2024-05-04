@@ -61,6 +61,8 @@ class OptimizationConfig(hyperparams.Config):
   )
   embedding_optimizer: str = 'SGD'
   dense_optimizer: str = 'Adam'
+  initial_accumulator_value: float = 0.
+  epsilon: float = 1.e-8
 
 
 @dataclasses.dataclass

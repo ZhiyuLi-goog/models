@@ -30,7 +30,18 @@ from official.recommendation.ranking import common
 from official.recommendation.ranking.task import RankingTask
 from official.utils.misc import keras_utils
 
+from mlperf_logging import mllog
+mllog_constants = mllog.constants
+
+import math
+from time import perf_counter
+
+import mllog_utils
+
 FLAGS = flags.FLAGS
+
+# TODO: change to 0.80275 later
+AUC_THRESHOLD = 0.785
 
 
 class RankingTrainer(base_trainer.Trainer):
@@ -39,6 +50,36 @@ class RankingTrainer(base_trainer.Trainer):
   The RankingModel has two optimizers for embedding and non embedding weights.
   Overriding `train_loop_end` method to log learning rates for each optimizer.
   """
+  mllogger = mllog.get_mllogger()
+  auc_threshold = AUC_THRESHOLD
+
+  def initialize(self):
+    super().initialize()
+    self.mllogger.end(mllog_constants.INIT_STOP)
+    self.mllogger.start(mllog_constants.RUN_START)
+    self._step_per_epoch = math.ceil(mllog_utils._NUM_TRAIN_EXAMPLES / self.config.task.train_data.global_batch_size)
+    self._start_time = perf_counter()
+    self._total_time = -1.0
+    self._throughput = -1.0
+
+  def train_loop_begin(self):
+    if self.epoch_num == 0.:
+      self.mllogger.start(
+        key=mllog_constants.EPOCH_START,
+        metadata={mllog_constants.EPOCH_NUM: self.epoch_num},
+      )
+    super().train_loop_begin()
+
+  @property
+  def epoch_num(self) -> float:
+    return (self.global_step / self._step_per_epoch).numpy()
+
+  def _compute_stats(self):
+    self._total_time = perf_counter() - self._start_time
+
+    # _compute_stats after finishing the global_step'th step
+    self._throughput = (self.global_step.numpy() + 1) * self.config.task.train_data.global_batch_size / self._total_time
+
 
   def train_loop_end(self) -> Dict[str, float]:
     """See base class."""
@@ -54,14 +95,82 @@ class RankingTrainer(base_trainer.Trainer):
         logs[lr_key] = optimizer.learning_rate(self.global_step)
       else:
         logs[lr_key] = optimizer.learning_rate
+
+    self._compute_stats()
+    print(f"Finish {self.global_step.numpy() + 1} iterations with "
+          f"batchsize: {self.config.task.train_data.global_batch_size} in {self._total_time:.2f}s."
+          )
+    self.mllogger.event(
+      key="tracked_throughtput",
+      value={"throughput": self._throughput},
+      metadata={mllog_constants.EPOCH_NUM: self.epoch_num},
+    )
+    if self.global_step.numpy() % self._step_per_epoch == 0:
+      self.mllogger.end(
+        key=mllog_constants.EPOCH_STOP,
+        metadata={
+          mllog_constants.EPOCH_NUM: self.epoch_num,
+        },
+      )
+    return logs
+
+  def eval_begin(self):
+    self.mllogger.start(
+        key=mllog_constants.EVAL_START,
+        metadata={mllog_constants.EPOCH_NUM: self.epoch_num},
+    )
+    return super().eval_begin()
+
+  def eval_end(self, aggregated_logs=None):
+    logs = super().eval_end(aggregated_logs=aggregated_logs)
+    auc = logs["mauc"].numpy()
+    self.mllogger.end(
+      key=mllog_constants.EVAL_ACCURACY,
+      value=auc,
+      metadata={mllog_constants.EPOCH_NUM: self.epoch_num},
+    )
+
+    self.mllogger.end(
+      key=mllog_constants.EVAL_STOP,
+      metadata={mllog_constants.EPOCH_NUM: self.epoch_num},
+    )
+
+    if auc >= self.auc_threshold:
+      print(f"early stop: {auc=} reaching auc_threshold={self.auc_threshold} at epoch_num={self.epoch_num}")
+      self.mllogger.end(
+        key=mllog_constants.RUN_STOP,
+        metadata={
+          'status': 'success',
+          mllog_constants.EPOCH_NUM: self.epoch_num,
+          },
+        )
+
+      self.mllogger.end(
+        key=mllog_constants.EPOCH_STOP,
+        metadata={
+          mllog_constants.EPOCH_NUM: self.epoch_num,
+        },
+      )
+
+      # assign global_step to train_step to step out of training loop
+      # see https://github.com/tensorflow/models/blob/master/orbit/controller.py#L390
+      self.global_step.assign(self.config.trainer.train_steps)
+
     return logs
 
 
 def main(_) -> None:
   """Train and evaluate the Ranking model."""
+  mllogger = mllog.get_mllogger()
+  mllogger.event(mllog_constants.CACHE_CLEAR)
+  mllogger.start(mllog_constants.INIT_START)
+
   params = train_utils.parse_configuration(FLAGS)
+  mllog_utils.init_print(params, FLAGS.seed)
+
   if params.runtime.mixed_precision_dtype:
     tf.keras.mixed_precision.set_global_policy(params.runtime.mixed_precision_dtype)
+
   mode = FLAGS.mode
   model_dir = FLAGS.model_dir
   if 'train' in FLAGS.mode:
