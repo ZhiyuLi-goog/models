@@ -41,7 +41,7 @@ import mllog_utils
 FLAGS = flags.FLAGS
 
 # TODO: change to 0.80275 later
-AUC_THRESHOLD = 0.785
+AUC_THRESHOLD = 0.80275
 
 
 class RankingTrainer(base_trainer.Trainer):
