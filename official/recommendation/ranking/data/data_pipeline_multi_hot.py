@@ -51,22 +51,24 @@ class CriteoTFRecordReader(object):
         if ctx
         else params.global_batch_size
     )
+    
+    tf_record_batch_size = 2112
 
     def _get_feature_spec():
       feature_spec = {}
     
       feature_spec[self.label_features] = tf.io.FixedLenFeature(
-          [batch_size,], dtype=tf.int64
+          [tf_record_batch_size,], dtype=tf.int64
       )
       
       for dense_feat in self.dense_features:
         feature_spec[dense_feat] = tf.io.FixedLenFeature(
-            [batch_size,],
+            [tf_record_batch_size,],
             dtype=tf.float32,
         )
       for sparse_feat in self.sparse_features:
         feature_spec[sparse_feat] = tf.io.FixedLenFeature(
-            [batch_size,], dtype=tf.string
+            [tf_record_batch_size,], dtype=tf.string
         )
       return feature_spec
 
@@ -77,10 +79,10 @@ class CriteoTFRecordReader(object):
       )
       label = parsed_features[self.label_features]
       features = {}
-      features['clicked'] = tf.reshape(label, [batch_size,])
+      features['clicked'] = tf.reshape(label, [tf_record_batch_size,])
       int_features = []
       for dense_ft in self.dense_features:
-        cur_feature = tf.reshape(parsed_features[dense_ft], [batch_size, 1])
+        cur_feature = tf.reshape(parsed_features[dense_ft], [tf_record_batch_size, 1])
         int_features.append(cur_feature)
       features['dense_features'] = tf.concat(int_features, axis=-1)
       features['sparse_features'] = {}
@@ -88,7 +90,7 @@ class CriteoTFRecordReader(object):
       for i, sparse_ft in enumerate(self.sparse_features):
         cat_ft_int64 = tf.io.decode_raw(parsed_features[sparse_ft], tf.int64)
         cat_ft_int64 = tf.reshape(
-            cat_ft_int64, [batch_size, self._multi_hot_sizes[i]]
+            cat_ft_int64, [tf_record_batch_size, self._multi_hot_sizes[i]]
         )
         features['sparse_features'][str(i)] = tf.sparse.from_dense(cat_ft_int64)
 
@@ -121,21 +123,22 @@ class CriteoTFRecordReader(object):
 
       def _mark_as_padding(features):
         """Padding will be denoted with a label value of -1."""
-        features['clicked'] = -1 * tf.ones(
-            [
-                batch_size,
-            ],
-            dtype=tf.int64,
-        )
+        # features['clicked'] = -1 * tf.ones(
+        #     [
+        #         batch_size,
+        #     ],
+        #     dtype=tf.int64,
+        # )
+        features['clicked'] = features['clicked'] * 0 - 1
         return features
 
       # 100 steps worth of padding.
       padding_ds = dataset.take(1) # If we're running 1 input pipeline per chip
-      padding_ds = padding_ds.map(_mark_as_padding).repeat(1000)
-      dataset = dataset.concatenate(padding_ds).take(660)
+      padding_ds = padding_ds.map(_mark_as_padding).repeat(5000)
+      dataset = dataset.concatenate(padding_ds).take(2000)
 
     dataset = dataset.prefetch(buffer_size=16)
     options = tf.data.Options()
     options.threading.private_threadpool_size = 48
     dataset = dataset.with_options(options)
-    return dataset
+    return dataset.rebatch(batch_size)
