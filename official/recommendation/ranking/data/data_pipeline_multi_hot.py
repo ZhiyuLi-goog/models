@@ -100,7 +100,7 @@ class CriteoTFRecordReader(object):
     self._num_files = len(dataset)
     self._num_input_pipelines = ctx.num_input_pipelines
     self._input_pipeline_id = ctx.input_pipeline_id
-    self._parallelism = int(min(self._num_files/self._num_input_pipelines, 8))
+    self._parallelism = int(min(self._num_files/self._num_input_pipelines, 4))
     
     dataset = dataset.shard(self._num_input_pipelines,
                               self._input_pipeline_id)
@@ -115,7 +115,7 @@ class CriteoTFRecordReader(object):
         num_parallel_reads=self._parallelism,
     )
     dataset = dataset.map(_parse_fn, num_parallel_calls=self._parallelism)
-    dataset = dataset.shuffle(256)
+    dataset = dataset.shuffle(16)
 
     if not params.is_training:
       num_eval_samples = 89137319
@@ -134,11 +134,11 @@ class CriteoTFRecordReader(object):
 
       # 100 steps worth of padding.
       padding_ds = dataset.take(1) # If we're running 1 input pipeline per chip
-      padding_ds = padding_ds.map(_mark_as_padding).repeat(5000)
-      dataset = dataset.concatenate(padding_ds).take(2000)
+      padding_ds = padding_ds.map(_mark_as_padding).repeat(1500)
+      dataset = dataset.concatenate(padding_ds).take(1000)
 
-    dataset = dataset.prefetch(buffer_size=16)
+    dataset = dataset.prefetch(buffer_size=8)
     options = tf.data.Options()
-    options.threading.private_threadpool_size = 48
+    options.threading.private_threadpool_size = 24
     dataset = dataset.with_options(options)
     return dataset.rebatch(batch_size)
